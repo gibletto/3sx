@@ -1,7 +1,9 @@
 #include "port/sdl/sdl_app.h"
 #include "common.h"
+#include "main.h"
 #include "port/config/config.h"
 #include "port/config/keymap.h"
+#include "port/renderer_plugin.h"
 #include "port/sdl/netplay_screen.h"
 #include "port/sdl/netstats_renderer.h"
 #include "port/sdl/sdl_debug_text.h"
@@ -159,6 +161,13 @@ int SDLApp_FullInit() {
     // Initialize rendering subsystems
     SDLMessageRenderer_Initialize(renderer);
     SDLGameRenderer_Init(renderer);
+
+    // Load renderer plugin if configured
+    if (configuration.renderer.plugin_name != NULL) {
+        if (RendererPlugin_Load(configuration.renderer.plugin_name, renderer, configuration.argc, configuration.argv)) {
+            SDLGameRenderer_SetScale(g_renderer_plugin->render_scale);
+        }
+    }
 
 #if DEBUG
     SDLDebugText_Initialize(renderer);

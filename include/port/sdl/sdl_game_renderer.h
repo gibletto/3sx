@@ -52,4 +52,11 @@ void SDLGameRenderer_DrawSolidQuad(const Quad* vertices, unsigned int color);
 void SDLGameRenderer_DrawSprite(const Sprite* sprite, unsigned int color);
 void SDLGameRenderer_DrawSprite2(const Sprite2* sprite2);
 
+/// Set the rendering scale (1 = standard, 4 = HD plugin active).
+void SDLGameRenderer_SetScale(int scale);
+int SDLGameRenderer_GetScale(void);
+
+/// Bridge for renderer plugin DLL to push render tasks into the base queue.
+void SDLGameRenderer_PushRenderTaskFromPlugin(SDL_Texture* texture, const SDL_Vertex vertices[4], float z);
+
 #endif

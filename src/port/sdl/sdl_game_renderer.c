@@ -13,7 +13,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "port/renderer_plugin.h"
+
 #define RENDER_TASK_MAX 1024
+
+// Rendering scale: 1x for standard, 4x when HD renderer plugin is active.
+// Set by SDLGameRenderer_SetScale() after plugin loads.
+static int texture_scale = 1;
 
 typedef struct RenderTask {
     SDL_Texture* texture;
@@ -133,7 +139,7 @@ static void destroy_textures() {
 
 static void push_render_task(RenderTask* task) {
     if (No_Trans) {
-        printf("⚠️ Requesting a render task when no rendering is allowed is a programmer error!\n");
+        printf("Requesting a render task when no rendering is allowed is a programmer error!\n");
     }
 
     memcpy(&render_tasks[render_task_count], task, sizeof(RenderTask));
@@ -151,7 +157,6 @@ static int compare_render_tasks(const RenderTask* a, const RenderTask* b) {
     } else if (a->z > b->z) {
         return 1;
     } else {
-        // This eliminates z-fighting
         if (a->index < b->index) {
             return 1;
         } else if (a->index > b->index) {
@@ -219,13 +224,32 @@ static void lerp_fcolors(SDL_FColor* dest, const SDL_FColor* a, const SDL_FColor
 
 void SDLGameRenderer_Init(SDL_Renderer* renderer) {
     _renderer = renderer;
-    cps3_canvas =
-        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, cps3_width, cps3_height);
+    cps3_canvas = SDL_CreateTexture(renderer,
+                                    SDL_PIXELFORMAT_RGBA8888,
+                                    SDL_TEXTUREACCESS_TARGET,
+                                    cps3_width * texture_scale,
+                                    cps3_height * texture_scale);
     SDL_SetTextureScaleMode(cps3_canvas, SDL_SCALEMODE_NEAREST);
 }
 
+void SDLGameRenderer_SetScale(int scale) {
+    texture_scale = scale;
+    if (_renderer != NULL && cps3_canvas != NULL) {
+        SDL_DestroyTexture(cps3_canvas);
+        cps3_canvas = SDL_CreateTexture(_renderer,
+                                        SDL_PIXELFORMAT_RGBA8888,
+                                        SDL_TEXTUREACCESS_TARGET,
+                                        cps3_width * texture_scale,
+                                        cps3_height * texture_scale);
+        SDL_SetTextureScaleMode(cps3_canvas, SDL_SCALEMODE_NEAREST);
+    }
+}
+
+int SDLGameRenderer_GetScale(void) {
+    return texture_scale;
+}
+
 void SDLGameRenderer_BeginFrame() {
-    // Clear canvas
     const Uint8 r = (flPs2State.FrameClearColor >> 16) & 0xFF;
     const Uint8 g = (flPs2State.FrameClearColor >> 8) & 0xFF;
     const Uint8 b = flPs2State.FrameClearColor & 0xFF;
@@ -459,8 +483,8 @@ static void draw_quad(const SDLGameRenderer_Vertex* vertices, bool textured) {
     SDL_zeroa(task.vertices);
 
     for (int i = 0; i < 4; i++) {
-        task.vertices[i].position.x = vertices[i].coord.x;
-        task.vertices[i].position.y = vertices[i].coord.y;
+        task.vertices[i].position.x = vertices[i].coord.x * texture_scale;
+        task.vertices[i].position.y = vertices[i].coord.y * texture_scale;
 
         if (textured) {
             task.vertices[i].tex_coord.x = vertices[i].tex_coord.s;
@@ -555,4 +579,15 @@ void SDLGameRenderer_DrawSprite2(const Sprite2* sprite2) {
     }
 
     SDLGameRenderer_DrawSprite(&sprite, sprite2->vertex_color);
+}
+
+// Plugin bridge: allows the renderer plugin DLL to push render tasks
+// into the base code's render queue for correct z-sorting.
+void SDLGameRenderer_PushRenderTaskFromPlugin(SDL_Texture* texture, const SDL_Vertex vertices[4], float z) {
+    RenderTask task;
+    task.index = render_task_count;
+    task.texture = texture;
+    task.z = z;
+    memcpy(task.vertices, vertices, sizeof(SDL_Vertex) * 4);
+    push_render_task(&task);
 }

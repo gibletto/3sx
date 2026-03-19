@@ -323,4 +323,20 @@ else
     echo "tf-psa-crypto installed to $TF_PSA_CRYPTO_BUILD"
 fi
 
+# -----------------------------
+# stb (header-only image loading library)
+# -----------------------------
+
+STB_DIR="$THIRD_PARTY/stb"
+STB_VERSION="013ac3beddff3dbffafd5177e7972067cd2b5083"
+
+if [ -f "$STB_DIR/stb_image.h" ]; then
+    echo "stb already fetched at $STB_DIR"
+else
+    echo "Fetching stb..."
+    mkdir -p "$STB_DIR"
+    curl -L -o "$STB_DIR/stb_image.h" "https://raw.githubusercontent.com/nothings/stb/$STB_VERSION/stb_image.h"
+    echo "stb installed to $STB_DIR"
+fi
+
 echo "All dependencies installed successfully in $THIRD_PARTY"

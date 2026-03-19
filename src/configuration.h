@@ -17,8 +17,15 @@ typedef struct TestRunnerConfiguration {
 } TestRunnerConfiguration;
 #endif
 
+typedef struct RendererConfiguration {
+    const char* plugin_name;
+} RendererConfiguration;
+
 typedef struct Configuration {
     NetplayConfiguration netplay;
+    RendererConfiguration renderer;
+    int argc;
+    const char** argv;
 #if DEBUG
     TestRunnerConfiguration test;
 #endif

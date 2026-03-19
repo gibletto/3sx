@@ -5,6 +5,7 @@
 
 #include "sf33rd/Source/Game/stage/bg.h"
 #include "common.h"
+#include "port/renderer_plugin.h"
 #include "sf33rd/AcrSDK/ps2/foundaps2.h"
 #include "sf33rd/Source/Common/MemMan.h"
 #include "sf33rd/Source/Common/PPGFile.h"
@@ -54,7 +55,13 @@ static void bgDrawOneChip(s32 x, s32 y, s32 xs, s32 ys, s32 gbix, u32 vtxCol, s3
 static void bgAkebonoDraw();
 static void ppgCalScrPosition(s32 x, s32 y, s32 xs, s32 ys);
 
+static int bg_texture_type = 0;
+
 void Bg_TexInit() {
+    bg_texture_type = 0;
+    if (RENDERER_HAS_PLUGIN()) {
+        g_renderer_plugin->ClearBGTileCache();
+    }
     s32 i;
 
     for (i = 0; i < 3; i++) {
@@ -257,6 +264,7 @@ void Bg_Texture_Load_EX() {
 
     mmDebWriteTag("\nSTAGE\n\n");
     Bg_TexInit();
+    bg_texture_type = 0x12;
 
     for (i = 0; i < 8; i++) {
         bgPalCodeOffset[i] = 0x12C;
@@ -375,6 +383,7 @@ void Bg_Texture_Load2(u8 type) {
 
     mmDebWriteTag("\nBG ETC.\n\n");
     Bg_TexInit();
+    bg_texture_type = 0x18;
     (void)assign;
     ending_flag = 0;
     tokusyu_stage = 0;
@@ -443,6 +452,7 @@ void Bg_Texture_Load_Ending(s16 type) {
     mmDebWriteTag("\nENDING\n\n");
     rw_num = 0;
     Bg_TexInit();
+    bg_texture_type = 0x20;
     ending_flag = 1;
 
     for (i = 0; i < end_use_real_scr[type]; i++) {
@@ -1096,6 +1106,15 @@ void bgDrawOneChip(s32 x, s32 y, s32 xs, s32 ys, s32 gbix, u32 vtxCol, s32 ofsPa
         if ((scrDrawPos->x >= 384.0f) || (scrDrawPos[3].x < 0.0f) || (scrDrawPos->y >= 224.0f) ||
             (scrDrawPos[3].y < 0.0f)) {
             return;
+        }
+
+        if (RENDERER_HAS_PLUGIN() && bg_texture_type != 0) {
+            SDL_Texture* hd_tex =
+                g_renderer_plugin->LoadBGTileOverride(bg_texture_type * 100000 + (bg_w.stage + 1) * 1000 + gbix);
+            if (hd_tex != NULL) {
+                g_renderer_plugin->DrawBGTile(hd_tex, scrDrawPos, vtxCol);
+                return;
+            }
         }
 
         ppgWriteQuadUseTrans(scrDrawPos, vtxCol, 0, gbix, 0, 0, ofsPal);

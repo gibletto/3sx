@@ -58,6 +58,15 @@ void read_args(int argc, const char* argv[], Configuration* configuration) {
         OPT_INTEGER(
             0, "matchmaking-port", &configuration->netplay.matchmaking_port, "Matchmaking server port.", NULL, 0, 0),
 
+        OPT_GROUP("Renderer"),
+        OPT_STRING(0,
+                   "renderer",
+                   &configuration->renderer.plugin_name,
+                   "Load a renderer plugin by name (e.g. renderer_hd).",
+                   NULL,
+                   0,
+                   0),
+
 #if DEBUG
         OPT_GROUP("Test runner"),
         OPT_BOOLEAN(0, "test-enable", &configuration->test.enabled, "Enable test runner.", NULL, 0, 0),
@@ -67,8 +76,18 @@ void read_args(int argc, const char* argv[], Configuration* configuration) {
         OPT_END(),
     };
 
+    /* Deep-copy argv before argparse can modify it.
+     * Plugins receive the original to parse their own arguments. */
+    const char** argv_copy = malloc(sizeof(const char*) * (argc + 1));
+    for (int i = 0; i < argc; i++) {
+        argv_copy[i] = argv[i];
+    }
+    argv_copy[argc] = NULL;
+    configuration->argc = argc;
+    configuration->argv = argv_copy;
+
     struct argparse argparse;
-    argparse_init(&argparse, options, NULL, 0);
+    argparse_init(&argparse, options, NULL, ARGPARSE_IGNORE_UNKNOWN_ARGS);
     argparse_parse(&argparse, argc, argv);
 
     verify_configuration(configuration);

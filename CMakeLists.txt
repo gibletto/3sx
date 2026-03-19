@@ -29,6 +29,12 @@ add_executable(3sx MACOSX_BUNDLE
 )
 
 # ======================================
+# Renderer HD plugin (optional DLL)
+# ======================================
+
+add_subdirectory(plugins/renderer_hd)
+
+# ======================================
 # Compiler and linker flags
 # ======================================
 
