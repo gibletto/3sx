@@ -39,6 +39,67 @@ f32 PrioBaseOriginal[PRIO_BASE_SIZE];
 
 static const u16 flptbl[4] = { 0x0000, 0x8000, 0x4000, 0xC000 };
 
+/**
+ * Compute the screen-space top-left position for a sprite override.
+ * Traces the tile bounding box using the same coordinate conventions as seqsStoreChip,
+ * then transforms through the current matrix via njCalcPoint.
+ *
+ * For ext variants: computes full bbox from tile map entries.
+ * For non-ext variants: pass count=0 to use the matrix origin directly.
+ */
+static bool compute_sprite_screen_pos(const TileMapEntry* trsptr, const u32* textbl, s32 count, s32 attr, Vec3* out) {
+    if (count <= 0) {
+        /* Non-ext: just transform the origin */
+        out->x = 0.0f;
+        out->y = 0.0f;
+        out->z = 0.0f;
+        njCalcPoint(NULL, out, out);
+        return true;
+    }
+
+    /* Ext: compute bounding box from tile map */
+    f32 bx = 0, by = 0;
+    s32 draw_min_x = 9999, draw_max_x = -9999;
+    s32 draw_max_y = -9999, draw_min_y = 9999;
+
+    for (s32 bi = 0; bi < count; bi++) {
+        if (attr & 0x8000) {
+            bx += trsptr[bi].x;
+        } else {
+            bx -= trsptr[bi].x;
+        }
+        if (attr & 0x4000) {
+            by -= trsptr[bi].y;
+        } else {
+            by += trsptr[bi].y;
+        }
+
+        TEX* tp = (TEX*)((uintptr_t)textbl + textbl[trsptr[bi].code]);
+        s32 bdw = (tp->wh & 0xE0) >> 2;
+        s32 bdh = (tp->wh & 0x1C) * 2;
+        s32 dx = (s32)bx - (bdw * BOOL(attr & 0x8000));
+        s32 dy = (s32)by + (bdh * BOOL(attr & 0x4000));
+
+        if (dx < draw_min_x)
+            draw_min_x = dx;
+        if (dx + bdw > draw_max_x)
+            draw_max_x = dx + bdw;
+        if (dy > draw_max_y)
+            draw_max_y = dy;
+        if (dy - bdh < draw_min_y)
+            draw_min_y = dy - bdh;
+    }
+
+    if (draw_max_x <= draw_min_x || draw_max_y <= draw_min_y)
+        return false;
+
+    out->x = (f32)draw_min_x;
+    out->y = (f32)draw_max_y;
+    out->z = 0.0f;
+    njCalcPoint(NULL, out, out);
+    return true;
+}
+
 static const u32 bright_type[4][16] = { { 0x00FFFFFF,
                                           0x00EEEEEE,
                                           0x00DDDDDD,
@@ -437,46 +498,10 @@ void mlt_obj_trans_ext(MultiTexture* mt, WORK* wk, s32 base_y) {
     mlt_obj_matrix(wk, base_y);
 
     if (RENDERER_HAS_PLUGIN()) {
-        SDL_Texture* hd_tex = g_renderer_plugin->LoadFullSpriteOverride(i, wk->cg_number);
-
-        if (hd_tex != NULL) {
-            f32 bx = 0, by = 0;
-            s32 draw_min_x = 9999, draw_max_x = -9999;
-            s32 draw_max_y = -9999, draw_min_y = 9999;
-
-            for (s32 bi = 0; bi < count; bi++) {
-                if (attr & 0x8000) {
-                    bx += trsptr[bi].x;
-                } else {
-                    bx -= trsptr[bi].x;
-                }
-                if (attr & 0x4000) {
-                    by -= trsptr[bi].y;
-                } else {
-                    by += trsptr[bi].y;
-                }
-
-                TEX* tp = (TEX*)((uintptr_t)textbl + textbl[trsptr[bi].code]);
-                s32 bdw = (tp->wh & 0xE0) >> 2;
-                s32 bdh = (tp->wh & 0x1C) * 2;
-                s32 dx = (s32)bx - (bdw * BOOL(attr & 0x8000));
-                s32 dy = (s32)by + (bdh * BOOL(attr & 0x4000));
-
-                if (dx < draw_min_x)
-                    draw_min_x = dx;
-                if (dx + bdw > draw_max_x)
-                    draw_max_x = dx + bdw;
-                if (dy > draw_max_y)
-                    draw_max_y = dy;
-                if (dy - bdh < draw_min_y)
-                    draw_min_y = dy - bdh;
-            }
-
-            if (draw_max_x > draw_min_x && draw_max_y > draw_min_y) {
-                Vec3 tl = { (f32)draw_min_x, (f32)draw_max_y, 0.0f };
-                njCalcPoint(NULL, &tl, &tl);
-                g_renderer_plugin->PushHDSprite(
-                    hd_tex, tl.x, tl.y, 0.0f, 0.0f, tl.z, (attr & 0x8000) ? 1 : 0, 0, curr_bright | 0xFF000000);
+        Vec3 tl;
+        if (compute_sprite_screen_pos(trsptr, textbl, count, attr, &tl)) {
+            if (g_renderer_plugin->TryRenderSprite(
+                    i, wk->cg_number, tl.x, tl.y, tl.z, (attr & 0x8000) ? 1 : 0, curr_bright | 0xFF000000)) {
                 return;
             }
         }
@@ -732,13 +757,12 @@ void mlt_obj_trans(MultiTexture* mt, WORK* wk, s32 base_y) {
     mlt_obj_matrix(wk, base_y);
 
     if (RENDERER_HAS_PLUGIN()) {
-        SDL_Texture* hd_tex = g_renderer_plugin->LoadFullSpriteOverride(i, wk->cg_number);
-        if (hd_tex != NULL) {
-            Vec3 tl = { 0.0f, 0.0f, 0.0f };
-            njCalcPoint(NULL, &tl, &tl);
-            g_renderer_plugin->PushHDSprite(
-                hd_tex, tl.x, tl.y, 0.0f, 0.0f, tl.z, (attr & 0x8000) ? 1 : 0, 0, curr_bright | 0xFF000000);
-            return;
+        Vec3 tl;
+        if (compute_sprite_screen_pos(NULL, NULL, 0, attr, &tl)) {
+            if (g_renderer_plugin->TryRenderSprite(
+                    i, wk->cg_number, tl.x, tl.y, tl.z, (attr & 0x8000) ? 1 : 0, curr_bright | 0xFF000000)) {
+                return;
+            }
         }
     }
 
@@ -868,45 +892,13 @@ void mlt_obj_trans_cp3_ext(MultiTexture* mt, WORK* wk, s32 base_y) {
 
     mlt_obj_matrix(wk, base_y);
 
-    if (RENDERER_HAS_PLUGIN() && count > 0) {
-        SDL_Texture* hd_tex = g_renderer_plugin->LoadFullSpriteOverride(i, wk->cg_number);
-
-        if (hd_tex != NULL) {
-            f32 bxe = 0, bye = 0;
-            s32 bmin_xe = 9999, bmin_ye = 9999, bmax_xe = -9999, bmax_ye = -9999;
-
-            for (s32 bi = 0; bi < count; bi++) {
-                if (flip & 0x8000) {
-                    bxe += trsptr[bi].x;
-                } else {
-                    bxe -= trsptr[bi].x;
-                }
-                if (flip & 0x4000) {
-                    bye -= trsptr[bi].y;
-                } else {
-                    bye += trsptr[bi].y;
-                }
-
-                TEX* tp = (TEX*)((uintptr_t)textbl + ((u32*)textbl)[trsptr[bi].code]);
-                s32 bdw = (tp->wh & 0xE0) >> 2;
-                s32 bdh = (tp->wh & 0x1C) * 2;
-                s32 bxei = (s32)bxe, byei = (s32)bye;
-
-                if (bxei < bmin_xe)
-                    bmin_xe = bxei;
-                if (bxei + bdw > bmax_xe)
-                    bmax_xe = bxei + bdw;
-                if (byei > bmax_ye)
-                    bmax_ye = byei;
-                if (byei - bdh < bmin_ye)
-                    bmin_ye = byei - bdh;
+    if (RENDERER_HAS_PLUGIN()) {
+        Vec3 tl;
+        if (compute_sprite_screen_pos(trsptr, textbl, count, flip, &tl)) {
+            if (g_renderer_plugin->TryRenderSprite(
+                    i, wk->cg_number, tl.x, tl.y, tl.z, (flip & 0x8000) ? 1 : 0, curr_bright | 0xFF000000)) {
+                return;
             }
-
-            Vec3 tl = { (f32)bmin_xe, (f32)bmax_ye, 0.0f };
-            njCalcPoint(NULL, &tl, &tl);
-            g_renderer_plugin->PushHDSprite(
-                hd_tex, tl.x, tl.y, 0.0f, 0.0f, tl.z, (flip & 0x8000) ? 1 : 0, 0, curr_bright | 0xFF000000);
-            return;
         }
     }
 
@@ -1172,13 +1164,12 @@ void mlt_obj_trans_cp3(MultiTexture* mt, WORK* wk, s32 base_y) {
     mlt_obj_matrix(wk, base_y);
 
     if (RENDERER_HAS_PLUGIN()) {
-        SDL_Texture* hd_tex = g_renderer_plugin->LoadFullSpriteOverride(i, wk->cg_number);
-        if (hd_tex != NULL) {
-            Vec3 tl = { 0.0f, 0.0f, 0.0f };
-            njCalcPoint(NULL, &tl, &tl);
-            g_renderer_plugin->PushHDSprite(
-                hd_tex, tl.x, tl.y, 0.0f, 0.0f, tl.z, (flip & 0x8000) ? 1 : 0, 0, curr_bright | 0xFF000000);
-            return;
+        Vec3 tl;
+        if (compute_sprite_screen_pos(NULL, NULL, 0, flip, &tl)) {
+            if (g_renderer_plugin->TryRenderSprite(
+                    i, wk->cg_number, tl.x, tl.y, tl.z, (flip & 0x8000) ? 1 : 0, curr_bright | 0xFF000000)) {
+                return;
+            }
         }
     }
 

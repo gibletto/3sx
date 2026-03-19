@@ -28,22 +28,21 @@ typedef struct renderer_export_t {
     /* Configuration — set by the plugin, read by the base code after Init. */
     int render_scale; /* Desired canvas scale (e.g. 4 for HD). */
 
-    /* Full-sprite overrides (character sprites, portraits, stage sprites) */
-    SDL_Texture* (*LoadFullSpriteOverride)(int group_index, int cg_number);
-
     /**
-     * Push an HD sprite into the render queue.
+     * Try to render a full-sprite override for the given group/cg.
+     * Loads the override texture and pushes it to the render queue if found.
      *
-     * @param texture   The HD texture to render.
-     * @param x0, y0    Screen-space origin position (pre-njCalcPoint).
-     * @param x1, y1    Fraction anchors (x1 = fraction left of origin, y1 = fraction above).
-     * @param z          Z depth for sorting.
-     * @param flip_x     Non-zero to flip horizontally.
-     * @param flip_y     Non-zero to flip vertically.
-     * @param color      ARGB vertex color.
+     * @param group_index  Texture group index.
+     * @param cg_number    CG animation frame number.
+     * @param screen_x     Screen-space X position (post-transform).
+     * @param screen_y     Screen-space Y position (post-transform).
+     * @param z            Z depth for sorting.
+     * @param flip_x       Non-zero to flip horizontally.
+     * @param color        ARGB vertex color.
+     * @return true if an override was rendered, false to fall through to standard rendering.
      */
-    void (*PushHDSprite)(SDL_Texture* texture, float x0, float y0, float x1, float y1, float z, int flip_x, int flip_y,
-                         unsigned int color);
+    bool (*TryRenderSprite)(int group_index, int cg_number, float screen_x, float screen_y, float z, int flip_x,
+                            unsigned int color);
 
     /* Background tile overrides */
     SDL_Texture* (*LoadBGTileOverride)(int gbix);

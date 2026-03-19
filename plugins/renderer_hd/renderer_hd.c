@@ -120,33 +120,31 @@ static SDL_Texture* hd_LoadFullSpriteOverride(int group_index, int cg_number) {
 }
 
 /* ================================================================
- * PushHDSprite — push into base code's render queue via import
+ * TryRenderSprite — load override + push to render queue in one call
  * ================================================================ */
 
-static void hd_PushHDSprite(SDL_Texture* texture, float x0, float y0, float x1, float y1, float z, int flip_x,
-                            int flip_y, unsigned int color) {
+static bool hd_TryRenderSprite(int group_index, int cg_number, float screen_x, float screen_y, float z, int flip_x,
+                               unsigned int color) {
+    SDL_Texture* texture = hd_LoadFullSpriteOverride(group_index, cg_number);
+    if (texture == NULL)
+        return false;
+
     float tex_w, tex_h;
     SDL_GetTextureSize(texture, &tex_w, &tex_h);
 
-    float origin_x = x0 * TEXTURE_SCALE;
-    float origin_y = y0 * TEXTURE_SCALE;
+    float origin_x = screen_x * TEXTURE_SCALE;
+    float origin_y = screen_y * TEXTURE_SCALE;
 
-    float sx0 = origin_x - tex_w * x1;
-    float sx1 = origin_x + tex_w * (1.0f - x1);
-    float sy0 = origin_y - tex_h * y1;
-    float sy1 = origin_y + tex_h * (1.0f - y1);
+    float sx0 = origin_x;
+    float sx1 = origin_x + tex_w;
+    float sy0 = origin_y;
+    float sy1 = origin_y + tex_h;
 
-    float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
-
+    float u0 = 0.0f, u1 = 1.0f;
     if (flip_x) {
         float tmp = u0;
         u0 = u1;
         u1 = tmp;
-    }
-    if (flip_y) {
-        float tmp = v0;
-        v0 = v1;
-        v1 = tmp;
     }
 
     const SDL_FColor fcolor = { .r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f };
@@ -157,28 +155,29 @@ static void hd_PushHDSprite(SDL_Texture* texture, float x0, float y0, float x1, 
     vertices[0].position.x = sx0;
     vertices[0].position.y = sy0;
     vertices[0].tex_coord.x = u0;
-    vertices[0].tex_coord.y = v0;
+    vertices[0].tex_coord.y = 0.0f;
     vertices[0].color = fcolor;
 
     vertices[1].position.x = sx1;
     vertices[1].position.y = sy0;
     vertices[1].tex_coord.x = u1;
-    vertices[1].tex_coord.y = v0;
+    vertices[1].tex_coord.y = 0.0f;
     vertices[1].color = fcolor;
 
     vertices[2].position.x = sx0;
     vertices[2].position.y = sy1;
     vertices[2].tex_coord.x = u0;
-    vertices[2].tex_coord.y = v1;
+    vertices[2].tex_coord.y = 1.0f;
     vertices[2].color = fcolor;
 
     vertices[3].position.x = sx1;
     vertices[3].position.y = sy1;
     vertices[3].tex_coord.x = u1;
-    vertices[3].tex_coord.y = v1;
+    vertices[3].tex_coord.y = 1.0f;
     vertices[3].color = fcolor;
 
     g_import->PushRenderTask(texture, vertices, g_import->ConvScreenFZ(z));
+    return true;
 }
 
 /* ================================================================
@@ -319,8 +318,7 @@ static renderer_export_t g_exports = {
     .Init = hd_Init,
     .Shutdown = hd_Shutdown,
     .render_scale = 4,
-    .LoadFullSpriteOverride = hd_LoadFullSpriteOverride,
-    .PushHDSprite = hd_PushHDSprite,
+    .TryRenderSprite = hd_TryRenderSprite,
     .LoadBGTileOverride = hd_LoadBGTileOverride,
     .DrawBGTile = hd_DrawBGTile,
     .ClearBGTileCache = hd_ClearBGTileCache,
