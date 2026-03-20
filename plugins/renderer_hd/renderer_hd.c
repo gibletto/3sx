@@ -19,6 +19,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ================================================================
@@ -28,8 +29,57 @@
 static const renderer_import_t* g_import = NULL;
 static SDL_Renderer* g_renderer = NULL;
 static char g_sprites_path[512] = { 0 };
+static int g_render_scale = 4;
+static int g_sprite_scale = 4;
+static float g_sprite_ratio = 1.0f; /* render_scale / sprite_scale */
+static renderer_export_t g_exports;
 
-#define TEXTURE_SCALE 4
+#define TEXTURE_SCALE g_render_scale
+
+/* ================================================================
+ * Texture loading helper — loads PNG and downscales if render_scale < sprite_scale
+ * ================================================================ */
+
+static SDL_Texture* load_png_texture(const char* path) {
+    int w, h, channels;
+    unsigned char* pixels = stbi_load(path, &w, &h, &channels, 4);
+    if (pixels == NULL)
+        return NULL;
+
+    SDL_Surface* surface = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_RGBA32, pixels, w * 4);
+    if (surface == NULL) {
+        stbi_image_free(pixels);
+        return NULL;
+    }
+
+    /* Downscale at load time if render_scale < sprite_scale to save GPU memory */
+    if (g_sprite_ratio < 1.0f && w > 1 && h > 1) {
+        int new_w = (int)(w * g_sprite_ratio + 0.5f);
+        int new_h = (int)(h * g_sprite_ratio + 0.5f);
+        if (new_w < 1)
+            new_w = 1;
+        if (new_h < 1)
+            new_h = 1;
+
+        SDL_Surface* scaled = SDL_CreateSurface(new_w, new_h, SDL_PIXELFORMAT_RGBA32);
+        if (scaled != NULL) {
+            SDL_BlitSurfaceScaled(surface, NULL, scaled, NULL, SDL_SCALEMODE_LINEAR);
+            SDL_DestroySurface(surface);
+            surface = scaled;
+        }
+    }
+
+    SDL_Texture* tex = SDL_CreateTextureFromSurface(g_renderer, surface);
+    SDL_DestroySurface(surface);
+    stbi_image_free(pixels);
+
+    if (tex != NULL) {
+        SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
+        SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+    }
+
+    return tex;
+}
 
 /* ================================================================
  * Full-sprite override cache
@@ -71,30 +121,11 @@ static SDL_Texture* hd_LoadFullSpriteOverride(int group_index, int cg_number) {
     char path[512];
     snprintf(path, sizeof(path), "%s/sprite_%d_%d.png", g_sprites_path, group_index, cg_number);
 
-    int w, h, channels;
-    unsigned char* pixels = stbi_load(path, &w, &h, &channels, 4);
+    SDL_Texture* tex = load_png_texture(path);
 
-    if (pixels == NULL) {
+    if (tex == NULL) {
         snprintf(path, sizeof(path), "%s/sprite_%d.png", g_sprites_path, cg_number);
-        pixels = stbi_load(path, &w, &h, &channels, 4);
-    }
-
-    SDL_Texture* tex = NULL;
-
-    if (pixels != NULL) {
-        SDL_Surface* surface = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_RGBA32, pixels, w * 4);
-
-        if (surface != NULL) {
-            tex = SDL_CreateTextureFromSurface(g_renderer, surface);
-            SDL_DestroySurface(surface);
-
-            if (tex != NULL) {
-                SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
-                SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-            }
-        }
-
-        stbi_image_free(pixels);
+        tex = load_png_texture(path);
     }
 
     /* Cache */
@@ -217,25 +248,7 @@ static SDL_Texture* hd_LoadBGTileOverride(int gbix) {
     char path[512];
     snprintf(path, sizeof(path), "%s/bg_%d.png", g_sprites_path, gbix);
 
-    int w, h, channels;
-    unsigned char* pixels = stbi_load(path, &w, &h, &channels, 4);
-    SDL_Texture* tex = NULL;
-
-    if (pixels != NULL) {
-        SDL_Surface* surface = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_RGBA32, pixels, w * 4);
-
-        if (surface != NULL) {
-            tex = SDL_CreateTextureFromSurface(g_renderer, surface);
-            SDL_DestroySurface(surface);
-
-            if (tex != NULL) {
-                SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
-                SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-            }
-        }
-
-        stbi_image_free(pixels);
-    }
+    SDL_Texture* tex = load_png_texture(path);
 
     slot = (uint32_t)gbix & BG_TILE_CACHE_MASK;
 
@@ -289,10 +302,24 @@ static void hd_DrawBGTile(SDL_Texture* texture, const void* scrDrawPos_raw, unsi
 static bool hd_Init(SDL_Renderer* renderer, int argc, const char** argv) {
     g_renderer = renderer;
 
+    int render_scale = 4;
+    int sprite_scale = 0; /* 0 = auto (match render_scale) */
+
     for (int i = 1; i < argc - 1; i++) {
         if (strcmp(argv[i], "--sprites-path") == 0) {
             snprintf(g_sprites_path, sizeof(g_sprites_path), "%s", argv[i + 1]);
-            break;
+        } else if (strcmp(argv[i], "--render-scale") == 0) {
+            render_scale = atoi(argv[i + 1]);
+            if (render_scale < 1)
+                render_scale = 1;
+            if (render_scale > 8)
+                render_scale = 8;
+        } else if (strcmp(argv[i], "--sprite-scale") == 0) {
+            sprite_scale = atoi(argv[i + 1]);
+            if (sprite_scale < 1)
+                sprite_scale = 1;
+            if (sprite_scale > 8)
+                sprite_scale = 8;
         }
     }
 
@@ -301,6 +328,13 @@ static bool hd_Init(SDL_Renderer* renderer, int argc, const char** argv) {
         return false;
     }
 
+    if (sprite_scale == 0)
+        sprite_scale = render_scale;
+
+    g_render_scale = render_scale;
+    g_sprite_scale = sprite_scale;
+    g_sprite_ratio = (float)render_scale / (float)sprite_scale;
+    g_exports.render_scale = render_scale;
     return true;
 }
 
@@ -310,25 +344,20 @@ static void hd_Shutdown(void) {
 }
 
 /* ================================================================
- * Export table
- * ================================================================ */
-
-static renderer_export_t g_exports = {
-    .api_version = RENDERER_PLUGIN_API_VERSION,
-    .Init = hd_Init,
-    .Shutdown = hd_Shutdown,
-    .render_scale = 4,
-    .TryRenderSprite = hd_TryRenderSprite,
-    .LoadBGTileOverride = hd_LoadBGTileOverride,
-    .DrawBGTile = hd_DrawBGTile,
-    .ClearBGTileCache = hd_ClearBGTileCache,
-};
-
-/* ================================================================
  * DLL entry point
  * ================================================================ */
 
 EXPORT renderer_export_t* GetRendererAPI(const renderer_import_t* import) {
     g_import = import;
+
+    g_exports.api_version = RENDERER_PLUGIN_API_VERSION;
+    g_exports.Init = hd_Init;
+    g_exports.Shutdown = hd_Shutdown;
+    g_exports.render_scale = 4;
+    g_exports.TryRenderSprite = hd_TryRenderSprite;
+    g_exports.LoadBGTileOverride = hd_LoadBGTileOverride;
+    g_exports.DrawBGTile = hd_DrawBGTile;
+    g_exports.ClearBGTileCache = hd_ClearBGTileCache;
+
     return &g_exports;
 }

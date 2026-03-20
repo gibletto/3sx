@@ -26,7 +26,22 @@ This produces `librenderer_hd.dll` (or `.so` on Linux) in the build directory, w
 ```
 
 - `--renderer <name>` is handled by the base code — it loads `lib<name>.dll` (or `.so`) from the executable directory.
-- `--sprites-path <path>` is parsed by the base code and forwarded to the plugin via the `extra_args` array in `Init`.
+- `--sprites-path <path>` specifies the directory containing HD sprite PNG overrides.
+- `--render-scale <n>` sets the canvas resolution multiplier (1-8, default 4). Higher values produce sharper output.
+- `--sprite-scale <n>` declares the scale of your sprite assets (1-8, default matches render-scale). If sprite-scale differs from render-scale, sprites are downscaled at load time to save GPU memory.
+
+### Examples
+
+```bash
+# Default: 4x canvas, 4x sprites
+3sx --renderer renderer_hd --sprites-path ./sprites
+
+# 2x canvas with 4x sprite assets (sprites downscaled to 2x at load, saves 75% GPU memory)
+3sx --renderer renderer_hd --sprites-path ./sprites --render-scale 2 --sprite-scale 4
+
+# 1x canvas, no upscaling (useful for testing override detection)
+3sx --renderer renderer_hd --sprites-path ./sprites --render-scale 1 --sprite-scale 1
+```
 
 ### File naming conventions
 
@@ -61,11 +76,10 @@ renderer_export_t* GetRendererAPI(const renderer_import_t* import);
 | Field | Description |
 |-------|-------------|
 | `api_version` | Must match `RENDERER_PLUGIN_API_VERSION` |
-| `Init` | Called with SDL renderer and NULL-terminated key/value `extra_args` array |
+| `Init` | Called with SDL renderer and `argc/argv` for plugin-specific arg parsing |
 | `Shutdown` | Called on unload |
-| `render_scale` | Desired canvas scale (e.g. 4 for HD) |
-| `LoadFullSpriteOverride` | Returns an `SDL_Texture*` for a sprite override, or NULL |
-| `PushHDSprite` | Submits an HD sprite to the render queue |
+| `render_scale` | Desired canvas scale, set by the plugin after parsing args |
+| `TryRenderSprite` | Loads and renders a sprite override, returns true if handled |
 | `LoadBGTileOverride` | Returns an `SDL_Texture*` for a background tile, or NULL |
 | `DrawBGTile` | Renders a background tile directly |
 | `ClearBGTileCache` | Called when stage textures change |
@@ -86,7 +100,7 @@ To create an alternative renderer plugin, implement `GetRendererAPI` in a shared
 
 1. Stores the import table pointer
 2. Returns a populated `renderer_export_t` with `api_version` set to `RENDERER_PLUGIN_API_VERSION`
-3. Reads configuration from the `extra_args` key/value pairs in `Init`
+3. Parses plugin-specific arguments from `argc/argv` in `Init`
 4. Uses `import->PushRenderTask` to submit render tasks for correct z-ordering with standard sprites
 
 Name the output `lib<name>.dll` (Windows) or `lib<name>.so` (Linux), then launch with `--renderer <name>`.
