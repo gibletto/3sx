@@ -278,25 +278,25 @@ void SDLGameRenderer_EndFrame() {
     clear_render_tasks();
 }
 
-void SDLGameRenderer_UnlockPalette(unsigned int ph) {
+void CRS_Renderer_UnlockPalette(unsigned int ph) {
     const int palette_handle = ph;
 
     if ((palette_handle > 0) && (palette_handle < FL_PALETTE_MAX)) {
-        SDLGameRenderer_DestroyPalette(palette_handle);
-        SDLGameRenderer_CreatePalette(ph << 16);
+        CRS_Renderer_DestroyPalette(palette_handle);
+        CRS_Renderer_CreatePalette(ph << 16);
     }
 }
 
-void SDLGameRenderer_UnlockTexture(unsigned int th) {
+void CRS_Renderer_UnlockTexture(unsigned int th) {
     const int texture_handle = th;
 
     if ((texture_handle > 0) && (texture_handle < FL_TEXTURE_MAX)) {
-        SDLGameRenderer_DestroyTexture(texture_handle);
-        SDLGameRenderer_CreateTexture(th);
+        CRS_Renderer_DestroyTexture(texture_handle);
+        CRS_Renderer_CreateTexture(th);
     }
 }
 
-void SDLGameRenderer_CreateTexture(unsigned int th) {
+void CRS_Renderer_CreateTexture(unsigned int th) {
     const int texture_index = LO_16_BITS(th) - 1;
     const FLTexture* fl_texture = &flTexture[texture_index];
     const void* pixels = flPS2GetSystemBuffAdrs(fl_texture->mem_handle);
@@ -333,7 +333,7 @@ void SDLGameRenderer_CreateTexture(unsigned int th) {
     surfaces[texture_index] = surface;
 }
 
-void SDLGameRenderer_DestroyTexture(unsigned int texture_handle) {
+void CRS_Renderer_DestroyTexture(unsigned int texture_handle) {
     const int texture_index = texture_handle - 1;
 
     for (int i = 0; i < FL_PALETTE_MAX + 1; i++) {
@@ -351,7 +351,7 @@ void SDLGameRenderer_DestroyTexture(unsigned int texture_handle) {
     surfaces[texture_index] = NULL;
 }
 
-void SDLGameRenderer_CreatePalette(unsigned int ph) {
+void CRS_Renderer_CreatePalette(unsigned int ph) {
     const int palette_index = HI_16_BITS(ph) - 1;
     const FLTexture* fl_palette = &flPalette[palette_index];
     const void* pixels = flPS2GetSystemBuffAdrs(fl_palette->mem_handle);
@@ -403,7 +403,7 @@ void SDLGameRenderer_CreatePalette(unsigned int ph) {
     palettes[palette_index] = palette;
 }
 
-void SDLGameRenderer_DestroyPalette(unsigned int palette_handle) {
+void CRS_Renderer_DestroyPalette(unsigned int palette_handle) {
     const int palette_index = palette_handle - 1;
 
     for (int i = 0; i < FL_TEXTURE_MAX; i++) {
@@ -421,7 +421,7 @@ void SDLGameRenderer_DestroyPalette(unsigned int palette_handle) {
     palettes[palette_index] = NULL;
 }
 
-void SDLGameRenderer_SetTexture(unsigned int th) {
+void CRS_Renderer_SetTexture(unsigned int th) {
     const int texture_handle = LO_16_BITS(th);
     const SDL_Surface* surface = surfaces[texture_handle - 1];
     const int palette_handle = HI_16_BITS(th);
@@ -473,7 +473,7 @@ static void draw_quad(const SDLGameRenderer_Vertex* vertices, bool textured) {
     push_render_task(&task);
 }
 
-void SDLGameRenderer_DrawTexturedQuad(const Sprite* sprite, unsigned int color) {
+void CRS_Renderer_DrawTexturedQuad(const Sprite* sprite, unsigned int color) {
     SDLGameRenderer_Vertex vertices[4];
     s32 i;
 
@@ -489,7 +489,7 @@ void SDLGameRenderer_DrawTexturedQuad(const Sprite* sprite, unsigned int color) 
     draw_quad(vertices, true);
 }
 
-void SDLGameRenderer_DrawSolidQuad(const Quad* sprite, unsigned int color) {
+void CRS_Renderer_DrawSolidQuad(const Quad* sprite, unsigned int color) {
     SDLGameRenderer_Vertex vertices[4];
     s32 i;
 
@@ -504,7 +504,7 @@ void SDLGameRenderer_DrawSolidQuad(const Quad* sprite, unsigned int color) {
     draw_quad(vertices, false);
 }
 
-void SDLGameRenderer_DrawSprite(const Sprite* sprite, unsigned int color) {
+void CRS_Renderer_DrawSprite(const Sprite* sprite, unsigned int color) {
     SDLGameRenderer_Vertex vertices[4];
     SDL_zeroa(vertices);
 
@@ -532,7 +532,7 @@ void SDLGameRenderer_DrawSprite(const Sprite* sprite, unsigned int color) {
     draw_quad(vertices, true);
 }
 
-void SDLGameRenderer_DrawSprite2(const Sprite2* sprite2) {
+void CRS_Renderer_DrawSprite2(const Sprite2* sprite2) {
     Sprite sprite;
     SDL_zero(sprite);
 
@@ -554,5 +554,5 @@ void SDLGameRenderer_DrawSprite2(const Sprite2* sprite2) {
         sprite.v[i].z = sprite2->v[0].z;
     }
 
-    SDLGameRenderer_DrawSprite(&sprite, sprite2->vertex_color);
+    CRS_Renderer_DrawSprite(&sprite, sprite2->vertex_color);
 }
