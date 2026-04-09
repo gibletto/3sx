@@ -1,15 +1,26 @@
 #ifndef PORT_RENDER_BACKEND_H
 #define PORT_RENDER_BACKEND_H
 
+#include <stdbool.h>
+
 #include "port/host_context.h"
 #include "rendering/game_renderer.h"
 
+typedef struct RenderBackendCapabilities {
+    PlatformHostBackendKind backend_kind;
+    bool native_present;
+    bool has_canvas_handle;
+} RenderBackendCapabilities;
+
 typedef struct RenderBackendOps {
+    const RenderBackendCapabilities* capabilities;
+
     void (*init)(const PlatformHostContext* host_context);
     void (*shutdown)();
     void (*begin_frame)();
     void (*render_frame)();
     void (*end_frame)();
+    void (*present)();
     void* (*get_canvas_handle)();
 
     void (*create_texture)(unsigned int th);

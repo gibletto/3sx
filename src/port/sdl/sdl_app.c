@@ -8,7 +8,6 @@
 #include "port/render_backend.h"
 #include "port/sdl/netplay_screen.h"
 #include "port/sdl/netstats_renderer.h"
-#include "port/sdl/scanline_renderer.h"
 #include "port/sdl/sdl_debug_text.h"
 #include "port/sdl/sdl_message_renderer.h"
 #include "port/sound/adx.h"
@@ -16,25 +15,14 @@
 
 #include <SDL3/SDL.h>
 
-typedef enum ScaleMode {
-    SCALEMODE_NEAREST,
-    SCALEMODE_LINEAR,
-    SCALEMODE_SOFT_LINEAR,
-    SCALEMODE_SQUARE_PIXELS,
-    SCALEMODE_INTEGER,
-} ScaleMode;
-
 static const char* app_name = "Street Fighter III: 3rd Strike";
-static const float display_target_ratio = 4.0 / 3.0;
 static const int window_min_width = 384;
-static const int window_min_height = (int)(window_min_width / display_target_ratio);
+static const int window_min_height = 288;
 static const Uint64 target_frame_time_ns = 1000000000.0 / TARGET_FPS;
 
 SDL_Window* window = NULL;
 static SDL_Renderer* renderer = NULL;
 static PlatformHostContext host_context = { 0 };
-static SDL_Texture* screen_texture = NULL;
-static ScaleMode scale_mode = SCALEMODE_SOFT_LINEAR;
 
 static Uint64 frame_deadline = 0;
 static FrameMetrics frame_metrics = { 0 };
@@ -43,63 +31,6 @@ static Uint64 last_frame_end_time = 0;
 static bool should_save_screenshot = false;
 static Uint64 last_mouse_motion_time = 0;
 static const int mouse_hide_delay_ms = 2000; // 2 seconds
-
-static SDL_ScaleMode screen_texture_scale_mode() {
-    switch (scale_mode) {
-    case SCALEMODE_LINEAR:
-    case SCALEMODE_SOFT_LINEAR:
-        return SDL_SCALEMODE_LINEAR;
-
-    case SCALEMODE_NEAREST:
-    case SCALEMODE_SQUARE_PIXELS:
-    case SCALEMODE_INTEGER:
-        return SDL_SCALEMODE_NEAREST;
-    default:
-        return SDL_SCALEMODE_INVALID;
-    }
-}
-
-static SDL_Point screen_texture_size() {
-    SDL_Point size;
-    SDL_GetRenderOutputSize(renderer, &size.x, &size.y);
-
-    if (scale_mode == SCALEMODE_SOFT_LINEAR) {
-        size.x *= 2;
-        size.y *= 2;
-    }
-
-    return size;
-}
-
-static void create_screen_texture() {
-    if (screen_texture != NULL) {
-        SDL_DestroyTexture(screen_texture);
-    }
-
-    const SDL_Point size = screen_texture_size();
-    screen_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB32, SDL_TEXTUREACCESS_TARGET, size.x, size.y);
-    SDL_SetTextureScaleMode(screen_texture, screen_texture_scale_mode());
-}
-
-static void init_scalemode() {
-    const char* raw_scalemode = Config_GetString(CFG_KEY_SCALEMODE);
-
-    if (raw_scalemode == NULL) {
-        return;
-    }
-
-    if (SDL_strcmp(raw_scalemode, "nearest") == 0) {
-        scale_mode = SCALEMODE_NEAREST;
-    } else if (SDL_strcmp(raw_scalemode, "linear") == 0) {
-        scale_mode = SCALEMODE_LINEAR;
-    } else if (SDL_strcmp(raw_scalemode, "soft-linear") == 0) {
-        scale_mode = SCALEMODE_SOFT_LINEAR;
-    } else if (SDL_strcmp(raw_scalemode, "square-pixels") == 0) {
-        scale_mode = SCALEMODE_SQUARE_PIXELS;
-    } else if (SDL_strcmp(raw_scalemode, "integer") == 0) {
-        scale_mode = SCALEMODE_INTEGER;
-    }
-}
 
 static bool init_window() {
     SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
@@ -148,7 +79,6 @@ int SDLApp_PreInit() {
 int SDLApp_FullInit() {
     Config_Init();
     Keymap_Init();
-    init_scalemode();
 
     if (!SDL_Init(SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
         SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
@@ -163,14 +93,10 @@ int SDLApp_FullInit() {
     // Initialize rendering subsystems
     SDLMessageRenderer_Initialize(renderer);
     g_render_backend.init(&host_context);
-    ScanlineRenderer_Init(renderer);
 
 #if DEBUG
     SDLDebugText_Initialize(renderer);
 #endif
-
-    // Initialize screen texture
-    create_screen_texture();
 
     // Initialize pads
     InputBackend_Init();
@@ -186,16 +112,10 @@ void SDLApp_Quit() {
     Config_Destroy();
     g_render_backend.shutdown();
     SDLMessageRenderer_Shutdown();
-    ScanlineRenderer_Destroy();
 
 #if DEBUG
     ImGuiW_Finish();
 #endif
-
-    if (screen_texture != NULL) {
-        SDL_DestroyTexture(screen_texture);
-        screen_texture = NULL;
-    }
 
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
@@ -282,10 +202,6 @@ bool SDLApp_PollEvents() {
             handle_mouse_motion();
             break;
 
-        case SDL_EVENT_WINDOW_RESIZED:
-            create_screen_texture();
-            break;
-
         case SDL_EVENT_QUIT:
             continue_running = false;
             break;
@@ -309,63 +225,6 @@ void SDLApp_BeginFrame() {
 #endif
 }
 
-static void center_rect(SDL_FRect* rect, int win_w, int win_h) {
-    rect->x = (win_w - rect->w) / 2;
-    rect->y = (win_h - rect->h) / 2;
-}
-
-static SDL_FRect fit_4_by_3_rect(int win_w, int win_h) {
-    SDL_FRect rect;
-    rect.w = win_w;
-    rect.h = win_w / display_target_ratio;
-
-    if (rect.h > win_h) {
-        rect.h = win_h;
-        rect.w = win_h * display_target_ratio;
-    }
-
-    center_rect(&rect, win_w, win_h);
-    return rect;
-}
-
-static SDL_FRect fit_integer_rect(int win_w, int win_h, int pixel_w, int pixel_h) {
-    const int virtual_w = win_w / pixel_w;
-    const int virtual_h = win_h / pixel_h;
-    const int scale_w = virtual_w / 384;
-    const int scale_h = virtual_h / 224;
-    int scale = (scale_h < scale_w) ? scale_h : scale_w;
-
-    // Better to show a cropped image than nothing at all
-    if (scale < 1) {
-        scale = 1;
-    }
-
-    SDL_FRect rect;
-    rect.w = scale * 384 * pixel_w;
-    rect.h = scale * 224 * pixel_h;
-    center_rect(&rect, win_w, win_h);
-    return rect;
-}
-
-static SDL_FRect get_letterbox_rect(int win_w, int win_h) {
-    switch (scale_mode) {
-    case SCALEMODE_NEAREST:
-    case SCALEMODE_LINEAR:
-    case SCALEMODE_SOFT_LINEAR:
-        return fit_4_by_3_rect(win_w, win_h);
-
-    case SCALEMODE_INTEGER:
-        // In order to scale a 384x224 buffer to 4:3 we need to stretch the image vertically by 9 / 7
-        return fit_integer_rect(win_w, win_h, 7, 9);
-
-    case SCALEMODE_SQUARE_PIXELS:
-        return fit_integer_rect(win_w, win_h, 1, 1);
-
-    default:
-        return fit_4_by_3_rect(win_w, win_h);
-    }
-}
-
 static void update_metrics(Uint64 sleep_time) {
     const Uint64 new_frame_end_time = SDL_GetTicksNS();
     const Uint64 frame_time = new_frame_end_time - last_frame_end_time;
@@ -387,6 +246,8 @@ static void save_texture(SDL_Texture* texture, const char* filename) {
 }
 
 void SDLApp_EndFrame() {
+    const RenderBackendCapabilities* render_caps = g_render_backend.capabilities;
+
     // Run sound processing
     ADX_ProcessTracks();
 
@@ -398,38 +259,21 @@ void SDLApp_EndFrame() {
     NetstatsRenderer_Render();
     g_render_backend.render_frame();
 
-    SDL_Texture* scene_canvas = g_render_backend.get_canvas_handle();
+    if (should_save_screenshot && render_caps != NULL && render_caps->has_canvas_handle) {
+        SDL_Texture* scene_canvas = g_render_backend.get_canvas_handle();
 
-    if (should_save_screenshot) {
-        save_texture(scene_canvas, "screenshot_cps3.bmp");
+        if (scene_canvas != NULL) {
+            save_texture(scene_canvas, "screenshot_cps3.bmp");
+        }
     }
 
-    SDL_SetRenderTarget(renderer, screen_texture);
+    g_render_backend.end_frame();
+    g_render_backend.present();
 
-    // Render window background
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // black bars
-    SDL_RenderClear(renderer);
-
-    // Render content
-    const SDL_FRect dst_rect = get_letterbox_rect(screen_texture->w, screen_texture->h);
-    SDL_RenderTexture(renderer, scene_canvas, NULL, &dst_rect);
-
-    if (message_canvas != NULL) {
-        SDL_RenderTexture(renderer, message_canvas, NULL, &dst_rect);
-    }
-
-    // Render screen texture to screen
-    SDL_SetRenderTarget(renderer, NULL);
-    SDL_RenderTexture(renderer, screen_texture, NULL, NULL);
-
-    // Apply scanlines using a cached overlay texture.
-    int win_w, win_h;
-    SDL_GetRenderOutputSize(renderer, &win_w, &win_h);
-    const SDL_FRect game_rect = get_letterbox_rect(win_w, win_h);
-    ScanlineRenderer_Render(&game_rect);
-
-    if (should_save_screenshot) {
-        save_texture(screen_texture, "screenshot_screen.bmp");
+    if (should_save_screenshot && renderer != NULL) {
+        const SDL_Surface* rendered_surface = SDL_RenderReadPixels(renderer, NULL);
+        SDL_SaveBMP(rendered_surface, "screenshot_screen.bmp");
+        SDL_DestroySurface((SDL_Surface*)rendered_surface);
     }
 
 #if DEBUG
@@ -441,8 +285,6 @@ void SDLApp_EndFrame() {
 
     SDL_RenderPresent(renderer);
 
-    // Cleanup
-    g_render_backend.end_frame();
     should_save_screenshot = false;
 
     // Handle cursor hiding
