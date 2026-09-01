@@ -1,6 +1,7 @@
 #if STATCHECK
 
 #include "test/test_runner_compare.h"
+#include "arcade/arcade_balance.h"
 #include "arcade/arcade_cmd_data.h"
 #include "arcade/arcade_constants.h"
 #include "args.h"
@@ -490,6 +491,12 @@ static void sync_waza_work(WAZA_WORK* dst, const WAZA_WORK* src) {
 void sync_values(SDL_IOStream* io) {
     Random_ix16 = read_s16(io, RANDOM_IX_16_OFFSET);
     Random_ix32 = read_s16(io, RANDOM_IX_32_OFFSET);
+
+    // Round_Level is per-cabinet session state that survives across matches. A replay resumes mid-session,
+    // so the value the recording ran under cannot be re-derived here; take it from the archive.
+    if (ArcadeBalance_IsEnabled()) {
+        Round_Level = read_s16(io, ROUND_LEVEL_OFFSET);
+    }
 
     // WORK_CP wcp_cps3[2];
     // read_wcp(io, wcp_cps3);
